@@ -8,7 +8,7 @@ body {
   margin : 0;
   border: 0;
   padding: 0;
-  overflow: scroll;
+  overflow: auto;
 }
 .box.file-nav {
   background : #555;
@@ -72,4 +72,46 @@ body {
 .typcn {
 font-size: 14px;
 line-height: 0.9;
+}
+.autocomplete-popup {
+  position: absolute;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  background: rgb(245, 239, 212);
+  z-index:1;
+}
+.autocomplete-input {
+  position: absolute;
+  z-index: 1;
+  width: 200px;
+
+}
+.autocomplete-popup li {
+  color: #555;
+  padding: 5px;
+  font-style: italic;
+  font-weight: bold;
+  display: block;
+  min-width: 200px;
+}
+.ld-result {
+  position: absolute;
+  z-index: 1;
+  width: 400px;
+  overflow-y: scroll;
+  background: rgb(245, 239, 212);
+  padding: 20px;
+  color: #333;
+}
+.ld-result .id {
+  font-weight: bold;
+}
+.ld-result div {
+  font-style: italic;
+}
+
+.ace_recommendation {
+  font-style: italic;
+  color: #9FCFFF;
 }

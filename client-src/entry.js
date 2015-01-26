@@ -1,9 +1,15 @@
 // all I want to do initially, as a test, is get a list of files... 
 
-var request = require('miniagent');
+var request = require('browser-request');
 var vfsRoot = window.location.protocol + "//" + window.location.host + "/vfs";
+var sockRoot = window.location.protocol + "//" + window.location.host + "/comms"
 var broker = new (require('events')).EventEmitter();
 var domify = require('domify');
+var marked = require('marked');
+
+var SocksJS = require('./lib/socks.js');
+
+
 
 var ace = require('brace');
 require('brace/mode/json');
@@ -22,7 +28,25 @@ var fileSystem = {
   }
 };
 
+var socket = new SocksJS(sockRoot);
+
+socket.onopen = function (){
+  console.log('socket open!');
+}
+socket.onmessage = function (e){
+
+    var msg = JSON.parse(e.data);
+
+    for (var i in msg){
+
+      console.log(msg[i], i)
+
+    }
+
+  }
+
 var editSessions = {};
+var activeSession = false;
 
 
 var fileSystemViewElements = {};
@@ -32,7 +56,6 @@ var page = createBox('page');
 page.position(0,0);
 page.size(window.innerWidth, window.innerHeight);
 page.appendToElement(document.querySelector('body'));
-
 
 
 var fileNavigation = createBox('file-nav');
@@ -74,6 +97,42 @@ window.onresize = function (event){
   page.size(window.innerWidth, window.innerHeight);
   fileNavigation.size(300, window.innerHeight);
   contentView.size(window.innerWidth - 301, window.innerHeight);
+}
+
+window.onkeydown = function (e){
+  if((e.ctrlKey || e.metaKey) && e.which == 83) {
+      // Save Function
+      e.preventDefault();
+      saveSession();
+      return false;
+  };
+}
+
+function saveSession (){
+
+  var val = activeSession.editor.getSession().getValue();
+
+  if (val !== activeSession.originalValue){
+  
+    var beingSaved = activeSession;
+
+    saveFile(activeSession.path, val, function (err, response){
+
+      if (!err){
+
+        var currentVal = beingSaved.editor.getSession().getValue();
+        if (currentVal === val){
+          beingSaved.tabHeader.querySelector('a').innerText = beingSaved.entity.name
+        }
+
+      } else {
+        alert(err);
+      }
+
+    })
+
+  }
+
 }
 
 function createBox (className){
@@ -160,6 +219,8 @@ function makeEditSessionActive (entity){
   session.tab.style.display = 'block';
   session.tabHeader.className += "active";
 
+  activeSession = session;
+
 }
 
 function editFile (entity){
@@ -175,6 +236,7 @@ function editFile (entity){
   loadFile(entity.href, function (err, response){
 
     var originalValue = response; 
+    session.originalValue = originalValue;
     session.editor.setValue(originalValue);
 
     session.editor.getSession().on('change', function (e){
@@ -196,6 +258,8 @@ function editFile (entity){
 
     session.tab.style.display = 'block';
     session.tabHeader.className += "active";
+
+    activeSession = session;
 
   });
 
@@ -236,31 +300,257 @@ function createEditSession (entity){
     tabHeader : tabHeader
   }
 
+  editor.on('change', function (){
+
+    var currline = editor.getSelectionRange().start.row;
+    var wholelinetext = editor.session.getLine(currline);
+    var currchar = editor.getSelectionRange().start.column;
+
+    var doSearch = false;
+    var uri = false;
+    var mode = false;
+
+    if (currchar === (wholelinetext.length - 1) && (/recommendations:$/.test(wholelinetext))){
+
+      doSearch = true;
+      uri = "something";
+      mode = "recommendations";
+
+    } else if (currchar === (wholelinetext.length - 1) && (/qualitystatements:$/.test(wholelinetext))){
+
+      doSearch = true;
+      uri = "somethingelse";
+      mode = "Quality statements";
+
+    }
+
+    if (doSearch){
+
+      var offset = editor.renderer.scroller.getBoundingClientRect();
+      var padding = editor.renderer.$padding;
+      var cur = editor.getCursorPosition();
+
+      // get the x and y position of 
+      var x = Math.ceil((cur.column + 1) * editor.renderer.characterWidth) + offset.left + padding;
+      var y = Math.ceil(cur.row * editor.renderer.lineHeight) + offset.top;
+
+      var input = domify('<input placeholder="Search for concepts" class="autocomplete-input" type="text"></input>');
+      //input.style.position = "absolute";
+      //input.style.zIndex = 1;
+      input.style.left = x + "px";
+      input.style.top = y + "px";
+
+      document.body.appendChild(input);
+
+      input.focus();
+
+      var lastVal = "";
+      var requestInProgress = false;
+
+      var container;
+
+      function getResults (term){
+          request('/ld/concepts/' + term, function (err, response, body){
+            requestInProgress = false;
+             processResults(err, JSON.parse(body));
+          });
+      };
+
+      function processResults (err, body){
+        requestInProgress = false;
+        if (lastVal !== input.value){
+          lastVal = input.value;
+          getResults(lastVal);
+        }
+        var rect = input.getBoundingClientRect();
+
+        if (container){
+          document.body.removeChild(container);
+        }
+
+        container = domify('<ul class="autocomplete-popup"></ul>');
+        container.style.position = "absolute";
+        container.style.top = rect.bottom + "px";
+        container.style.left = rect.left + "px";
+
+        body.forEach(function (concept, index){
+
+          var li = domify('<li>' + concept.value.object +'</li>');
+          li.onclick = function (e){
+            e.preventDefault();
+
+            // remove event handlers from other lis..
+            var fns = [];
+            Array.prototype.forEach.call(container.querySelectorAll('li'), function (li){
+              //input.value = concept.value.object;
+              currentVal = lastVal = input.value = concept.value.object;
+              li.onclick = false;
+              fns.push(function (){
+                container.removeChild(li);
+              });
+            });
+            fns.forEach(function (fn){ fn(); });
+
+            document.body.removeChild(input);
+
+            var loading = domify('<li class="loading">Searching for ' + mode + ' for ' + concept.value.object +'</li>');
+            container.appendChild(loading);
+
+            container.style.top = rect.top + "px";
+
+            searchForThings(concept.value.object);
+
+
+            //document.body.removeChild(container);
+            //editor.focus();
+            //editor.insert(concept.value.subject);
+            //document.body.removeChild(input);
+          }
+          container.appendChild(li);
+
+        });
+
+        document.body.appendChild(container);
+
+        //console.log(input.calculateBoundingRect())
+        //console.log(body);
+      };
+
+      function searchForThings (tag){
+        if (mode === "recommendations"){
+          request('/ld/recommendations/' + tag, function (err, res){
+            var triples = JSON.parse(res.body);
+            console.log(triples);
+            var rect = container.getBoundingClientRect();
+
+            var results = domify('<div class="ld-result"><h3>Recommendations</h3><ul></ul></div>');
+            var ul = results.querySelector('ul');
+
+            results.style.top = rect.top + "px";
+            results.style.left = rect.left + "px";
+            results.style.maxHeight = (window.innerHeight - rect.top - 200) + 'px'
+
+            document.body.removeChild(container);
+            container = "";
+
+            triples.forEach(function (triple){
+
+              var li = domify('<li></li>');
+              var id = domify('<p class="id">' + triple.subject + '</p>');
+              var text = domify('<div>' + marked(triple.object.replace(/\n\?\s/g, '\n- ')) + '</div>');
+              var insert = domify('<a href="#">Insert a link to this recommendation</a>');
+
+              insert.onclick = function (e){
+
+                e.preventDefault();
+                editor.focus();
+                editor.insert(triple.subject);
+
+                // 
+                Array.prototype.forEach.call(results.querySelectorAll('a'), function (a){
+                  a.onclick = "";
+                });
+
+                document.body.removeChild(results);
+                results = null;
+
+              }
+
+              li.appendChild(id);
+              li.appendChild(text);
+              li.appendChild(insert);
+
+              ul.appendChild(li);
+
+            });
+
+            document.body.appendChild(results);
+
+          })
+        }
+      }
+
+      input.onkeyup = function (e){
+
+        var currentVal = input.value.trim();
+
+        if (currentVal !== ""){
+
+          // get the options
+
+          if (lastVal !== currentVal && !requestInProgress){
+            requestInProgress = true;
+            lastVal = currentVal;
+            getResults(lastVal);
+          }
+
+        } else {
+
+          // clear the options...
+
+        }
+
+      }
+
+    
+      // looking for recommendations
+
+
+      // comedy proof of concept...
+
+      //setTimeout(function (){
+
+      //  editor.focus();
+      //  editor.insert(input.value);
+       // document.body.removeChild(input);
+
+     // }, 10000)
+
+
+    }
+
+    /*
+
+     editor.renderer.scroller.getBoundingClientRect()
+
+    */
+
+  });
+
   return editSessions[path];
 
 }
 
+function saveFile(path, body, callback){
+  request.put({ uri : path, body : body}, function (err, response){
+    callback(err, response);
+  });
+}
+
 function loadFile(path, callback){
-    request
-    .get(path)
-    .accept('text/plain')
-    .end(function (err, response){
-
-      callback(err, response.text);
-
-    });
+  request(path, function (err, response, body){
+    callback(err, body);
+  });
 }
 
 function loadDirectory(path){
-  request
-    .get(path)
-    .end(function (err, response){
+  request(path, function (err, response, body){
+
+    if (!err){
+
+      if (response.getResponseHeader('Content-TYpe') === "application/json"){
+        body = JSON.parse(body);
+      }
 
       var reference = getDirectoryReference(path);
-      updateFileSystem(path, response.body);
+      updateFileSystem(path, body);
       renderCurrentDirectory(reference);
 
-    });
+    } else {
+      alert(err);
+    }
+
+  });
 }
 
 function getDirectoryReference(path){

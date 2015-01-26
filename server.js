@@ -11,13 +11,15 @@ process.title = "gore.io";
 // command line args..
 var projectRoot = argv.project;
 var port = argv.port;
+var proxyHost = argv.proxyhost;
+var proxyPort = argv.proxyport;
 
-if (!projectRoot || !port){
-  console.log('Usage:\n\t' + process.argv[0] + ' ' + __filename.replace(__dirname + '/', '') + ' --project [path] --port [port]');
+if (!projectRoot || !port || !proxyHost || !proxyPort){
+  console.log('Usage:\n\t' + process.argv[0] + ' ' + __filename.replace(__dirname + '/', '') + ' --project [path] --port [port] --proxyhost [host] --proxyport');
   process.exit();
 }
 
-
+require('./proxy').configure(proxyHost, proxyPort);
 
 var root = 'http://localhost:' + port + '/vfs/';
 
@@ -36,10 +38,9 @@ watchr.watch({
   paths : [projectRoot],
   listeners : {
     change : function(changeType,filePath,fileCurrentStat,filePreviousStat){
+      console.log(changeType);
       broker.emit(changeType, {
-        path : filePath,
-        stat : fileCurrentStat,
-        prev : filePreviousStat
+        path : filePath.replace(projectRoot, '')
       });
     }
   }
@@ -69,6 +70,8 @@ function createApplicationAndBeginListening (port, vfs, broker){
 
   });
 
+  require('./proxy').listen(app);
+
   var server = require('http').Server(app);
 
   var sockjs = require('sockjs');
@@ -79,6 +82,8 @@ function createApplicationAndBeginListening (port, vfs, broker){
   sock.on('connection', function (conn){
 
     socketConnections.push(conn);
+
+    conn.write(JSON.stringify({ hello : 'world'}));
 
     conn.on('data', function (message){
 
@@ -101,17 +106,18 @@ function createApplicationAndBeginListening (port, vfs, broker){
 
   broker.on('create', function (msg){
     socketConnections.forEach(function (conn){
-      conn.write('create', JSON.stringify(msg));
+      conn.write(JSON.stringify({create : msg}));
     })
   });
-  broker.on('change', function (msg){
+  broker.on('update', function (msg){
     socketConnections.forEach(function (conn){
-      conn.write('change', JSON.stringify(msg));
+      conn.write(JSON.stringify({ update : msg }));
     });
   });
   broker.on('delete', function (msg){
     socketConnections.forEach(function (conn){
-      conn.write('update', JSON.stringify(msg));
+      conn.write(JSON.stringify({ 'delete' : msg }));
+      //conn.write('update', JSON.stringify(msg));
     });
   });
 
