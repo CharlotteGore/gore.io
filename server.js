@@ -4,18 +4,16 @@ var watchr = require('watchr');
 var path = require('path');
 var fs = require('fs');
 
-var argv = require('minimist')(process.argv.slice(2));
-
 process.title = "gore.io";
 
 // command line args..
-var projectRoot = argv.project;
-var port = argv.port;
-var proxyHost = argv.proxyhost;
-var proxyPort = argv.proxyport;
+var projectRoot = process.env.PROJECT_DIR || false;
+var port = process.env.MIMIR_PORT || false;
+var proxyHost = process.env.OLDDEMO_PORT_80_TCP_ADDR || process.env.LD_HOST || false;
+var proxyPort = process.env.OLDDEMO_PORT_80_TCP_PORT || process.env.LD_PORT || false;
 
 if (!projectRoot || !port || !proxyHost || !proxyPort){
-  console.log('Usage:\n\t' + process.argv[0] + ' ' + __filename.replace(__dirname + '/', '') + ' --project [path] --port [port] --proxyhost [host] --proxyport');
+  console.log('Ensure that PROJECT_DIR, MIMIR_PORT, LD_HOST and LD_PORT environment variables are set');
   process.exit();
 }
 
